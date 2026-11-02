@@ -14,7 +14,12 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIME_LIMIT = 2.0
+TIME_LIMIT = 2.0  # ジャッジと同じ 1 ケースの制限時間
+PREVIEW_TOKENS = 20  # WA のとき、期待と出力を先頭から何個まで見せるか
+
+
+def preview(tokens):
+    return b" ".join(tokens[:PREVIEW_TOKENS]).decode("utf-8", "replace")
 
 
 def main():
@@ -50,8 +55,8 @@ def main():
             print("%-6s AC   %.3fs" % (name, elapsed))
         else:
             print("%-6s WA   %.3fs" % (name, elapsed))
-            print("  期待: %s" % b" ".join(expected[:20]).decode())
-            print("  出力: %s" % b" ".join(got[:20]).decode())
+            print("  期待: %s" % preview(expected))
+            print("  出力: %s" % preview(got))
     print("\n%d/%d 件 AC" % (passed, len(cases)))
     sys.exit(0 if passed == len(cases) else 1)
 

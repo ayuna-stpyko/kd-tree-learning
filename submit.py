@@ -17,21 +17,16 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
-MAX_BYTES = 65536
-WAIT_LIMIT = 600  # 秒
-
-VERDICT_NAMES = {
-    "AC": "Accepted",
-    "WA": "Wrong Answer",
-    "TLE": "Time Limit Exceeded",
-    "RE": "Runtime Error",
-    "MLE": "Memory Limit Exceeded",
-    "OLE": "Output Limit Exceeded",
-    "CE": "Compile Error",
-    "IE": "Internal Error",
-}
-PHASE_NAMES = {"correctness": "正誤判定", "score": "スコア計測"}
+NAME_MAX_LEN = 32
+NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,%d}$" % NAME_MAX_LEN)
+MAX_SOURCE_BYTES = 65536  # ジャッジ側の上限と同じ
+WAIT_LIMIT_SEC = 600  # これより長く待ったら、後で --status で見るよう案内して終わる
+POLL_SEC = 1
+HTTP_TIMEOUT_SEC = 15
+STATUS_WIDTH = 40  # 状況の表示を上書きするときの幅
+TIMES_PER_LINE = 5  # 次元ごとの時間を 1 行に何個並べるか
+CORRECTNESS, SCORE = "correctness", "score"
+PHASE_NAMES = {CORRECTNESS: "正誤判定", SCORE: "スコア計測"}
 
 
 def die(msg):
@@ -55,7 +50,7 @@ def load_env():
     name = env.get("NAME", "")
     url = env.get("JUDGE_URL", "").rstrip("/")
     if not NAME_RE.match(name):
-        die(".env の NAME が不正です (英数字と _ - のみ、32 文字以内): %r" % name)
+        die(".env の NAME が不正です (英数字と _ - のみ、%d 文字以内): %r" % (NAME_MAX_LEN, name))
     if not url.startswith("http"):
         die(".env の JUDGE_URL が設定されていません")
     return name, url
@@ -65,7 +60,7 @@ def request(url, data=None):
     body = json.dumps(data).encode("utf-8") if data is not None else None
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC) as r:
             return r.status, json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
@@ -84,31 +79,33 @@ def status_line(st):
         return "待機中… 前に %d 件" % ahead if ahead else "待機中… まもなく判定します"
     if s == "running":
         p = st.get("progress") or {}
-        if p.get("phase") == "correctness":
-            return "判定中… 正誤判定 %d/%d" % (p.get("done", 0), p.get("total", 0))
-        if p.get("phase") == "score":
-            return "判定中… スコア計測 d=%s" % p.get("d") if p.get("d") else "判定中… スコア計測"
-        return "判定中… 準備中"
+        phase = PHASE_NAMES.get(p.get("phase"))
+        if phase is None:
+            return "判定中… 準備中"
+        if p["phase"] == CORRECTNESS:
+            return "判定中… %s %d/%d" % (phase, p.get("done", 0), p.get("total", 0))
+        return "判定中… %s d=%s" % (phase, p["d"]) if p.get("d") else "判定中… " + phase
     return ""
 
 
 def show_result(st, url):
     v = st["verdict"]
-    name = VERDICT_NAMES.get(v, v)
+    name = st.get("verdict_name", v)
     if v == "AC":
         print("Accepted  score %.3fs" % st["score"])
         times = sorted(st.get("score_times", {}).items(), key=lambda x: int(x[0]))
-        for i in range(0, len(times), 5):
-            print("  " + "  ".join("d=%-2s %.3fs" % (d, t) for d, t in times[i:i + 5]))
+        for i in range(0, len(times), TIMES_PER_LINE):
+            print("  " + "  ".join("d=%-2s %.3fs" % (d, t) for d, t in times[i:i + TIMES_PER_LINE]))
         print("順位表: %s/" % url)
         return
     f = st.get("failed")
     where = ""
     if f:
-        if f["phase"] == "correctness":
-            where = "正誤判定 #%d, D=%d" % (f["index"], f["d"])
+        phase = PHASE_NAMES.get(f["phase"], f["phase"])
+        if f["phase"] == CORRECTNESS:
+            where = "%s #%d, D=%d" % (phase, f["index"], f["d"])
         else:
-            where = "スコア計測 d=%d" % f["d"]
+            where = "%s d=%d" % (phase, f["d"])
     msg = st.get("message")
     if v == "CE":
         print("%s\n  %s" % (name, msg or ""))
@@ -117,7 +114,7 @@ def show_result(st, url):
         print("%s  (%s)" % (name, detail) if detail else name)
     c = st.get("correctness")
     if c and v != "CE":
-        print("  正誤判定: %d/%d 件 AC" % (c["passed"], c["total"]))
+        print("  %s: %d/%d 件 AC" % (PHASE_NAMES[CORRECTNESS], c["passed"], c["total"]))
 
 
 def wait_result(url, sid):
@@ -131,21 +128,21 @@ def wait_result(url, sid):
                 die(st["error"])
             if st["status"] == "done":
                 if tty and last:
-                    sys.stdout.write("\r" + " " * 40 + "\r")
+                    sys.stdout.write("\r" + " " * STATUS_WIDTH + "\r")
                 show_result(st, url)
                 return 0 if st["verdict"] == "AC" else 1
             line = status_line(st)
             if line != last:
                 if tty:
-                    sys.stdout.write("\r" + line.ljust(40))
+                    sys.stdout.write("\r" + line.ljust(STATUS_WIDTH))
                     sys.stdout.flush()
                 else:
                     print(line)
                 last = line
-            if time.time() - start > WAIT_LIMIT:
+            if time.time() - start > WAIT_LIMIT_SEC:
                 print("\n時間がかかっています。結果は後で確認できます:\n  python3 submit.py --status %d" % sid)
                 return 1
-            time.sleep(1)
+            time.sleep(POLL_SEC)
     except KeyboardInterrupt:
         print("\n判定は続いています。結果は次のコマンドで確認できます:\n  python3 submit.py --status %d" % sid)
         return 1
@@ -165,8 +162,8 @@ def main():
         die("ファイルがありません: %s" % path)
     with open(path, "rb") as f:
         raw = f.read()
-    if len(raw) > MAX_BYTES:
-        die("ファイルが大きすぎます (%d バイト。上限 %d バイト)" % (len(raw), MAX_BYTES))
+    if len(raw) > MAX_SOURCE_BYTES:
+        die("ファイルが大きすぎます (%d バイト。上限 %d バイト)" % (len(raw), MAX_SOURCE_BYTES))
     try:
         source = raw.decode("utf-8")
     except UnicodeDecodeError:
