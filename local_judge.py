@@ -3,6 +3,11 @@
 
     python3 local_judge.py               # solution.py を確認
     python3 local_judge.py my_answer.py  # ファイルを指定
+    python3 local_judge.py --problem 1           # 練習問題 practice/1/solution.py を
+                                                     # practice/1/samples で確認
+    python3 local_judge.py --problem 1 my_1d.py  # 練習問題にファイルを指定
+
+--problem: 省略すると本問題 (kd-tree)。1 = 練習問題 1 次元、2 = 練習問題 2 次元マンハッタン距離
 
 手元の python3 で動かす。ジャッジとは実行環境が違うので、時間は目安。
 標準ライブラリだけで動く (Python 3.9 以降)。
@@ -16,6 +21,12 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 TIME_LIMIT = 2.0  # ジャッジと同じ 1 ケースの制限時間
 PREVIEW_TOKENS = 20  # WA のとき、期待と出力を先頭から何個まで見せるか
+MAIN_PROBLEM = "kdtree-nn"
+# 練習問題: --problem に指定する番号 -> (ジャッジでの問題 ID, ディレクトリ)
+PRACTICE_PROBLEMS = {
+    "1": ("nn-1d", "practice/1"),
+    "2": ("nn-2d-l1", "practice/2"),
+}
 
 
 def preview(tokens):
@@ -23,12 +34,23 @@ def preview(tokens):
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "solution.py")
+    args = sys.argv[1:]
+    problem, base = MAIN_PROBLEM, HERE
+    if args[:1] == ["--problem"]:
+        if len(args) < 2 or args[1] not in PRACTICE_PROBLEMS:
+            sys.exit("--problem には 1 (1 次元) か 2 (2 次元マンハッタン距離) を指定してください")
+        problem, sub = PRACTICE_PROBLEMS[args[1]]
+        base = os.path.join(HERE, sub)
+        args = args[2:]
+    if len(args) > 1 or (args and args[0].startswith("-")):
+        sys.exit(__doc__.strip())
+    path = args[0] if args else os.path.join(base, "solution.py")
     if not os.path.isfile(path):
         sys.exit("ファイルがありません: %s" % path)
-    cases = sorted(glob.glob(os.path.join(HERE, "samples", "*.in")))
+    samples = os.path.join(base, "samples")
+    cases = sorted(glob.glob(os.path.join(samples, "*.in")))
     if not cases:
-        sys.exit("samples/ にケースがありません")
+        sys.exit("%s にケースがありません" % samples)
 
     passed = 0
     for inp in cases:

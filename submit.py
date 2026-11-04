@@ -3,7 +3,11 @@
 
     python3 submit.py               # solution.py を提出
     python3 submit.py my_answer.py  # ファイルを指定して提出
+    python3 submit.py --problem 1             # 練習問題 practice/1/solution.py を提出
+    python3 submit.py --problem 1 my_1d.py    # 練習問題にファイルを指定して提出
     python3 submit.py --status 42   # 提出 42 の結果を見る
+
+--problem: 省略すると本問題 (kd-tree)。1 = 練習問題 1 次元、2 = 練習問題 2 次元マンハッタン距離 (順位表には載らない)
 
 事前に .env.example を .env にコピーして、NAME (自分の名前) と JUDGE_URL を書いておく。
 標準ライブラリだけで動く (Python 3.9 以降)。
@@ -26,6 +30,12 @@ HTTP_TIMEOUT_SEC = 15
 STATUS_WIDTH = 40  # 状況の表示を上書きするときの幅
 TIMES_PER_LINE = 5  # 次元ごとの時間を 1 行に何個並べるか
 CORRECTNESS, SCORE = "correctness", "score"
+MAIN_PROBLEM = "kdtree-nn"
+# 練習問題: --problem に指定する番号 -> (ジャッジでの問題 ID, ディレクトリ)
+PRACTICE_PROBLEMS = {
+    "1": ("nn-1d", "practice/1"),
+    "2": ("nn-2d-l1", "practice/2"),
+}
 PHASE_NAMES = {CORRECTNESS: "正誤判定", SCORE: "スコア計測"}
 
 
@@ -91,6 +101,10 @@ def status_line(st):
 def show_result(st, url):
     v = st["verdict"]
     name = st.get("verdict_name", v)
+    if v == "AC" and st.get("score") is None:  # 練習問題 (スコアなし)
+        c = st.get("correctness") or {}
+        print("Accepted  (%d/%d 件 AC)" % (c.get("passed", 0), c.get("total", 0)))
+        return
     if v == "AC":
         print("Accepted  score %.3fs" % st["score"])
         times = sorted(st.get("score_times", {}).items(), key=lambda x: int(x[0]))
@@ -155,9 +169,17 @@ def main():
         if len(args) != 2 or not args[1].isdigit():
             die("使い方: python3 submit.py --status 提出ID")
         sys.exit(wait_result(url, int(args[1])))
+    problem, base, shown = MAIN_PROBLEM, HERE, ""
+    if args[:1] == ["--problem"]:
+        if len(args) < 2 or args[1] not in PRACTICE_PROBLEMS:
+            die("--problem には 1 (1 次元) か 2 (2 次元マンハッタン距離) を指定してください")
+        problem, sub = PRACTICE_PROBLEMS[args[1]]
+        base = os.path.join(HERE, sub)
+        shown = ", 練習問題 %s" % args[1]
+        args = args[2:]
     if len(args) > 1 or (args and args[0].startswith("-")):
         die(__doc__.strip())
-    path = args[0] if args else os.path.join(HERE, "solution.py")
+    path = args[0] if args else os.path.join(base, "solution.py")
     if not os.path.isfile(path):
         die("ファイルがありません: %s" % path)
     with open(path, "rb") as f:
@@ -171,11 +193,11 @@ def main():
     if not source.strip():
         die("ファイルが空です")
 
-    code, res = request(url + "/api/submit", {"name": name, "source": source})
+    code, res = request(url + "/api/submit", {"name": name, "problem": problem, "source": source})
     if code != 200:
         die(res.get("error", "提出に失敗しました (HTTP %d)" % code))
     sid = res["id"]
-    print("提出しました (名前: %s, ID: %d)" % (name, sid))
+    print("提出しました (名前: %s, ID: %d%s)" % (name, sid, shown))
     sys.exit(wait_result(url, sid))
 
 

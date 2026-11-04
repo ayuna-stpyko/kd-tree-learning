@@ -121,6 +121,22 @@ python3 submit.py
 | Output Limit Exceeded (OLE) | 出力が多すぎる |
 | Compile Error (CE) | 文法エラー |
 
+## 練習問題
+
+kd-tree に入る前の練習として、判定だけが返る問題があります (順位表には載りません。提出間隔の制限は本問題と共通です)。
+
+| `--problem` | 内容 | 問題文 |
+|---|---|---|
+| `1` | 1 次元の最近傍点 | [practice/1/README.md](practice/1/README.md) |
+| `2` | 2 次元の最近傍点 (マンハッタン距離) | [practice/2/README.md](practice/2/README.md) |
+
+`--problem` で問題の番号を指定します。ファイルを省略すると、その問題のディレクトリの `solution.py` (例: `practice/1/solution.py`) を使います。
+
+```bash
+python3 local_judge.py --problem 1
+python3 submit.py --problem 1
+```
+
 ## 順位表
 
 `JUDGE_URL` をブラウザで開くと見られます (10.24 のネットワークから)。
